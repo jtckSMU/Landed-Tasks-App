@@ -447,7 +447,7 @@ $("p-access").addEventListener("click",async e=>{const t=e.target;
     if(t.dataset.remove){const id=t.dataset.remove;armed(t,()=>S.db.doc("access/"+id).delete().then(()=>log("Access","Removed","Removed access for",[],id)).catch(fail))}
   }catch(err){status("Couldn't update access: "+err.message);t.disabled=false}});
 
-function gate(title,text,showBtn){$("main").hidden=true;$("gate").hidden=false;
+function gate(title,text,showBtn){$("gateBtn").textContent="Request access";$("gateBtn").onclick=S.requestAccess||null;$("main").hidden=true;$("gate").hidden=false;
   $("gateTitle").textContent=title;$("gateText").textContent=text;$("gateBtn").hidden=!showBtn}
 function openBoard(){$("gate").hidden=true;$("main").hidden=false}
 
@@ -456,14 +456,25 @@ renderAll();
 
 /* data */
 let started=false;
+const BOARD_URL="https://claude.ai/artifact/2wuAWTJcXzBomHzKtV1YQS";
+const within=(p,ms,fallback)=>Promise.race([Promise.resolve(p).catch(()=>fallback),new Promise(r=>setTimeout(()=>r(fallback),ms))]);
+/* if nothing has decided access after 15 s, say so instead of spinning forever */
+const watchdog=setTimeout(()=>{if($("gateTitle").textContent.startsWith("Checking")){
+  gate("Couldn't confirm your access","The board didn't get an answer about who you are. Allow the board's permissions, then reload this page.",false);
+  const b=$("gateBtn");b.textContent="Open permissions";b.hidden=false;b.disabled=false;
+  b.onclick=async()=>{try{const p=await claude.use("permissions");await p.manage();location.reload()}
+    catch(e){$("gateText").textContent="Open the board's menu at the top of the page, choose Permissions, allow everything, then reload."}}}},15000);
 (async()=>{
+  if(!window.claude||typeof claude.use!=="function"){
+    gate("Open the board from its claude.ai link","This copy can't load the team's data. Use "+BOARD_URL,false);return}
   const db=await claude.use("db");
   if(!db){gate("Sign in to use this board","Open this link while signed in to your claude.ai account.",false);return}
   S.db=db;
   const user=await claude.use("user");S.user=user;
-  const me=user?await user.me():null;S.uid=me?.id||null;
-  if(me?.name)$("who").textContent="Signed in as "+me.name;
-  if(me?.isOwner){$("tab-access").hidden=false;openBoard();start(db,user);if(startTab==="access")showTab("access");
+  const [isOwner,uid]=user?await Promise.all([within(user.isOwner(),8000,false),within(user.id(),8000,null)]):[false,null];
+  S.uid=uid;
+  if(user)within(user.name(),15000,"").then(n=>{if(n)$("who").textContent="Signed in as "+n});
+  if(isOwner){$("tab-access").hidden=false;openBoard();start(db,user);if(startTab==="access")showTab("access");
     logVisit("Logged in","Opened the board (owner)");
     db.collection("requests").onSnapshot(s=>{S.reqs=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||0)-(a.at||0));renderAccess()},()=>{});
     db.collection("access").onSnapshot(s=>{S.appr=s.docs.filter(d=>d.data().approved).map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||0)-(a.at||0));renderAccess()},()=>{});
@@ -474,7 +485,7 @@ let started=false;
   const showPending=()=>requested
     ?gate("Request sent","The owner needs to approve you before you can use the board. This page opens by itself once you're approved.",false)
     :gate("You're not on the approved list yet","Tap Request access and the owner will see your name. This page opens by itself once you're approved.",true);
-  $("gateBtn").onclick=async()=>{$("gateBtn").disabled=true;
+  $("gateBtn").onclick=S.requestAccess=async()=>{$("gateBtn").disabled=true;
     try{await db.doc("requests/"+S.uid).set({at:Date.now()});requested=true;showPending();log("Logins","Requested access","Asked to be approved")}
     catch(err){$("gateBtn").disabled=false;$("gateText").textContent="Your request couldn't be sent. You may only have view access to this link; ask the owner to give you Contributor access in the Share menu, then try again."}};
   db.doc("access/"+S.uid).onSnapshot(s=>{if(s.metadata.fromCache&&!s.exists)return;accessKnown=true;
