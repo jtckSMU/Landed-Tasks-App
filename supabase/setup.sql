@@ -20,8 +20,9 @@ create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare u text := lower(split_part(new.email, '@', 1));
 begin
-  insert into public.profiles (id, username, display_name)
-  values (new.id, u, initcap(u))
+  -- The owner's login (jonathan) is switched on as admin straight away; everyone else waits for approval.
+  insert into public.profiles (id, username, display_name, role, active)
+  values (new.id, u, initcap(u), case when u = 'jonathan' then 'admin' else 'member' end, u = 'jonathan')
   on conflict (id) do nothing;
   return new;
 end $$;
@@ -253,6 +254,12 @@ end $$;
 drop policy if exists "members read records" on public.audit_log;
 create policy "members read records" on public.audit_log for select to authenticated
   using (public.is_member());
+
+-- Explicit table access for logged-in users (the security rules above still decide which rows).
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.tasks, public.late, public.accounts to authenticated;
+grant select, update on public.roles, public.late_policy, public.profiles to authenticated;
+revoke all on public.tasks, public.late, public.accounts, public.roles, public.late_policy, public.profiles from anon;
 
 revoke all on public.audit_log from anon, authenticated;
 grant select on public.audit_log to authenticated;
