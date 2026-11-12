@@ -109,6 +109,7 @@ td.amt.in{color:var(--ok)} td.amt.out{color:var(--bad)}
 /* entry records */
 td.when{white-space:nowrap}
 .chip.a-added{color:var(--ok)} .chip.a-deleted{background:var(--bad);color:#fff} .chip.a-edited{color:var(--accent)}
+.chip.a-logged-in{color:var(--accent)} .chip.a-blocked{color:var(--bad)} .chip.a-requested-access{color:var(--warn)}
 .changes{margin:4px 0 0;padding:0;list-style:none;font-size:13px;color:var(--muted);display:grid;gap:2px}
 .changes b{color:var(--fg);font-weight:500}
 .who{font-size:13px;color:var(--muted);margin-top:4px}
@@ -194,7 +195,7 @@ td.c .btn{height:34px;padding:5px 12px}
   <section id="p-records" role="tabpanel" hidden>
     <div class="acc-head">
       <div class="field"><label class="label" for="rSection">Showing</label>
-        <select id="rSection"><option value="">All sections</option><option>Task</option><option>Roles</option><option>Late</option><option>Late rule</option><option>Accounts</option><option>Access</option></select></div>
+        <select id="rSection"><option value="">All sections</option><option>Task</option><option>Roles</option><option>Late</option><option>Late rule</option><option>Accounts</option><option>Access</option><option>Logins</option></select></div>
     </div>
     <div class="tbl"><table>
       <thead><tr><th>When</th><th>By</th><th>Section</th><th>Action</th><th>Details</th></tr></thead>
@@ -240,6 +241,13 @@ async function log(section,action,summary,changes,subject){
     const rec={at:Date.now(),section,action,summary,changes:changes||[]};if(subject)rec.subject=subject;
     await S.db.collection("records/"+S.uid+"/log").add(rec);
   }catch(err){status("Saved, but the entry record couldn't be written: "+err.message)}}
+/* login tracking: one record per visit; a reload within 30 minutes in the same tab counts as the same visit */
+function logVisit(action,summary){
+  const key="visit:"+action;let last=0;
+  try{last=Number(sessionStorage.getItem(key))||0}catch(e){}
+  if(Date.now()-last<30*60*1000)return;
+  try{sessionStorage.setItem(key,String(Date.now()))}catch(e){}
+  log("Logins",action,summary)}
 const taskSum=t=>`${t.title} · ${t.owner} · due ${fmtDate(t.due)}`;
 const accSum=a=>`${a.desc} · ${a.type==="in"?"In":"Out"} ${money(a.amount)} · ${fmtDate(a.date)}`;
 const TASK_F={title:"Task",owner:"In charge",due:"Deadline"},ACC_F={date:"Date",desc:"Description",type:"Type",amount:"Amount"};
@@ -409,7 +417,7 @@ async function renderRecords(){const tok=++recToken;const sec=$("rSection").valu
   const when=ms=>new Date(ms).toLocaleString(undefined,{day:"numeric",month:"short",year:"numeric",hour:"numeric",minute:"2-digit"});
   $("recRows").innerHTML=rows.length?rows.map(r=>{const ch=Array.isArray(r.changes)?r.changes:[];
     return `<tr><td class="num when">${when(r.at)}</td><td class="c">${esc(ps[r.uid]?.name||"Someone")}</td>
-      <td class="c"><span class="chip">${esc(r.section)}</span></td><td class="c"><span class="chip a-${esc(String(r.action).toLowerCase())}">${esc(r.action)}</span></td>
+      <td class="c"><span class="chip">${esc(r.section)}</span></td><td class="c"><span class="chip a-${esc(String(r.action).toLowerCase().replace(/\s+/g,"-"))}">${esc(r.action)}</span></td>
       <td>${esc(r.summary)}${r.subject?" "+esc(ps[r.subject]?.name||"someone"):""}${ch.length?`<ul class="changes">${ch.map(c=>`<li>${esc(c.field)}: ${esc(c.from)||"—"} → <b>${esc(c.to)||"—"}</b></li>`).join("")}</ul>`:""}</td></tr>`}).join("")
     :`<tr><td colspan="5" class="empty">${S.loaded?"No entry records yet. Every add, edit or delete on the other tabs is recorded here with who did it and when.":"Loading records…"}</td></tr>`}
 $("rSection").addEventListener("change",renderRecords);
@@ -456,6 +464,7 @@ let started=false;
   const me=user?await user.me():null;S.uid=me?.id||null;
   if(me?.name)$("who").textContent="Signed in as "+me.name;
   if(me?.isOwner){$("tab-access").hidden=false;openBoard();start(db,user);if(startTab==="access")showTab("access");
+    logVisit("Logged in","Opened the board (owner)");
     db.collection("requests").onSnapshot(s=>{S.reqs=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||0)-(a.at||0));renderAccess()},()=>{});
     db.collection("access").onSnapshot(s=>{S.appr=s.docs.filter(d=>d.data().approved).map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||0)-(a.at||0));renderAccess()},()=>{});
     return}
@@ -466,11 +475,11 @@ let started=false;
     ?gate("Request sent","The owner needs to approve you before you can use the board. This page opens by itself once you're approved.",false)
     :gate("You're not on the approved list yet","Tap Request access and the owner will see your name. This page opens by itself once you're approved.",true);
   $("gateBtn").onclick=async()=>{$("gateBtn").disabled=true;
-    try{await db.doc("requests/"+S.uid).set({at:Date.now()});requested=true;showPending()}
+    try{await db.doc("requests/"+S.uid).set({at:Date.now()});requested=true;showPending();log("Logins","Requested access","Asked to be approved")}
     catch(err){$("gateBtn").disabled=false;$("gateText").textContent="Your request couldn't be sent. You may only have view access to this link; ask the owner to give you Contributor access in the Share menu, then try again."}};
   db.doc("access/"+S.uid).onSnapshot(s=>{if(s.metadata.fromCache&&!s.exists)return;accessKnown=true;
-    if(s.exists&&s.data().approved){openBoard();if(!started)start(db,user)}
-    else{started=started&&"paused";showPending()}},()=>gate("Can't check your access","The board's data can't be reached right now. Try again shortly.",false));
+    if(s.exists&&s.data().approved){openBoard();if(!started)start(db,user);logVisit("Logged in","Opened the board")}
+    else{started=started&&"paused";showPending();logVisit("Blocked","Opened the board without approval")}},()=>gate("Can't check your access","The board's data can't be reached right now. Try again shortly.",false));
 })();
 
 function start(db,user){started=true;
