@@ -137,7 +137,25 @@ td.amt.in{color:var(--ok)} td.amt.out{color:var(--bad)}
     <div class="field"><label class="label" for="lgPass">Password</label><input id="lgPass" type="password" autocomplete="current-password" required></div>
     <p class="err" id="lgErr" role="alert"></p>
     <button class="btn" type="submit" id="lgBtn">Log in</button>
-    <p class="sub">Forgot your password? Ask Jonathan to reset it.</p>
+    <p class="sub">First time? Use the temporary password Jonathan gave you. You'll choose your own straight after. Forgot your password? Ask Jonathan to reset it.</p>
+  </form>
+
+  <form class="card" id="setupAdminCard" hidden>
+    <h2>First-time setup</h2>
+    <p class="sub">No one can log in yet. Choose the password for the admin login, <b class="mono">jonathan</b>. You'll add everyone else from the Team tab.</p>
+    <div class="field"><label class="label" for="saPass">Password</label><input id="saPass" type="password" autocomplete="new-password" minlength="8" required></div>
+    <div class="field"><label class="label" for="saPass2">Password again</label><input id="saPass2" type="password" autocomplete="new-password" minlength="8" required></div>
+    <p class="err" id="saErr" role="alert"></p>
+    <button class="btn" type="submit" id="saBtn">Create admin login</button>
+  </form>
+
+  <form class="card" id="firstPwCard" hidden>
+    <h2>Choose your own password</h2>
+    <p class="sub">You logged in with a temporary password. Pick a new one that only you know before using the board.</p>
+    <div class="field"><label class="label" for="fpNew">New password</label><input id="fpNew" type="password" autocomplete="new-password" minlength="8" required></div>
+    <div class="field"><label class="label" for="fpNew2">New password again</label><input id="fpNew2" type="password" autocomplete="new-password" minlength="8" required></div>
+    <p class="err" id="fpErr" role="alert"></p>
+    <button class="btn" type="submit" id="fpBtn">Save password</button>
   </form>
 
   <section class="card" id="blockedCard" hidden>
@@ -213,16 +231,13 @@ td.amt.in{color:var(--ok)} td.amt.out{color:var(--bad)}
     </section>
 
     <section id="p-team" role="tabpanel" hidden>
-      <div class="note sub">
-        To add someone, in Supabase open <b>Authentication → Users → Add user → Create new user</b>:
-        <ol>
-          <li>Email: their username followed by <span class="mono" id="domainHint"></span> (for example <span class="mono" id="exampleHint"></span>)</li>
-          <li>Password: a starting password you give them</li>
-          <li>Tick <b>Auto Confirm User</b>, then <b>Create user</b>.</li>
-          <li>They appear here switched off. Tick <b>Can log in</b> and press <b>Save</b>.</li>
-        </ol>
-        To reset a forgotten password, run the reset snippet from <span class="mono">SETUP.md</span> in Supabase's SQL Editor. Recovery emails don't work, because the login addresses aren't real mailboxes.
-      </div>
+      <p class="note sub">Add a member with a temporary password and pass it to them. When they first log in, the board makes them choose their own. <b>Reset password</b> does the same for someone who forgot theirs.</p>
+      <form class="add" id="memberForm">
+        <div class="field"><label class="label" for="mUser">Username</label><input id="mUser" required autocapitalize="none" spellcheck="false" pattern="[a-z0-9._-]{2,30}" placeholder="e.g. rachael"></div>
+        <div class="field"><label class="label" for="mName">Name shown</label><input id="mName" placeholder="e.g. Rachael"></div>
+        <div class="field"><label class="label" for="mPass">Temporary password</label><input id="mPass" type="text" autocomplete="off" minlength="8" required></div>
+        <button class="btn" type="submit">Add member</button>
+      </form>
       <div class="tbl"><table>
         <thead><tr><th>Name shown</th><th>Username</th><th>Role</th><th>Can log in</th><th></th></tr></thead>
         <tbody id="teamRows"></tbody>
@@ -255,12 +270,11 @@ const fmtDate=iso=>{if(!iso)return"";const[y,m,d]=String(iso).slice(0,10).split(
 const ordinal=n=>n+(["th","st","nd","rd"][(n%100-20)%10]||["th","st","nd","rd"][n%100]||"th");
 const money=n=>"S$"+(Number(n)||0).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
 const status=t=>{$("status").textContent=t||""};
-const show=id=>["setupCard","loginCard","blockedCard","main"].forEach(x=>$(x).hidden=x!==id);
+const show=id=>["setupCard","loginCard","setupAdminCard","firstPwCard","blockedCard","main"].forEach(x=>$(x).hidden=x!==id);
 const toEmail=u=>{u=u.trim().toLowerCase();return u.includes("@")?u:u+"@"+CFG.USER_DOMAIN};
 
 if(!CFG.SUPABASE_URL||!CFG.SUPABASE_ANON_KEY||!window.supabase){show("setupCard");throw new Error("Board not configured")}
 const sb=window.supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_ANON_KEY);
-$("domainHint").textContent="@"+CFG.USER_DOMAIN;$("exampleHint").textContent="rachael@"+CFG.USER_DOMAIN;
 
 /* tabs */
 const TABS=["tasks","late","accounts","records","team"];
@@ -281,12 +295,41 @@ $("loginCard").addEventListener("submit",async e=>{e.preventDefault();
   $("lgBtn").disabled=false;
   if(error){$("lgErr").textContent=error.message.includes("Invalid")?"Wrong username or password.":"Couldn't log in: "+error.message;return}
   $("lgPass").value="";});
-async function logout(){try{await sb.rpc("log_session_event",{p_action:"Logged out"})}catch(e){}await sb.auth.signOut()}
+async function logout(){try{await sb.rpc("log_session_event",{p_action:"Logged out"})}catch(e){}await sb.auth.signOut();location.reload()}
 $("logout").onclick=logout;$("blockedOut").onclick=logout;
+
+/* first-time setup: shown only while the project has no logins */
+async function showLogin(){
+  const {data:needed}=await sb.rpc("setup_needed");
+  if(needed){show("setupAdminCard");$("saPass").focus();return}
+  show("loginCard");$("lgUser").focus()}
+$("setupAdminCard").addEventListener("submit",async e=>{e.preventDefault();$("saErr").textContent="";
+  const p1=$("saPass").value,p2=$("saPass2").value;
+  if(p1.length<8){$("saErr").textContent="Use at least 8 characters.";return}
+  if(p1!==p2){$("saErr").textContent="The two passwords don't match.";return}
+  $("saBtn").disabled=true;
+  const {error}=await sb.rpc("bootstrap_admin",{p_password:p1});
+  if(error){$("saBtn").disabled=false;$("saErr").textContent=error.message;return}
+  const r=await sb.auth.signInWithPassword({email:toEmail("jonathan"),password:p1});
+  $("saBtn").disabled=false;$("setupAdminCard").reset();
+  if(r.error){$("saErr").textContent="Admin login created. Log in as jonathan.";show("loginCard")}});
+
+/* forced password change after logging in with a temporary password */
+$("firstPwCard").addEventListener("submit",async e=>{e.preventDefault();$("fpErr").textContent="";
+  const n1=$("fpNew").value,n2=$("fpNew2").value;
+  if(n1.length<8){$("fpErr").textContent="Use at least 8 characters.";return}
+  if(n1!==n2){$("fpErr").textContent="The two passwords don't match.";return}
+  $("fpBtn").disabled=true;
+  const {error}=await sb.auth.updateUser({password:n1});
+  if(error){$("fpBtn").disabled=false;$("fpErr").textContent=error.message.includes("different")?"Pick a password different from the temporary one.":"Couldn't save it: "+error.message;return}
+  await sb.rpc("password_changed");
+  $("fpBtn").disabled=false;$("firstPwCard").reset();
+  if(S.me)S.me.must_change_password=false;
+  openBoard()});
 
 let entered=null;
 sb.auth.onAuthStateChange((event,session)=>{
-  if(!session){entered=null;S.user=null;$("topbar").hidden=true;status("");show("loginCard");setTimeout(()=>$("lgUser").focus(),0);return}
+  if(!session){entered=null;S.user=null;$("topbar").hidden=true;status("");showLogin();return}
   if(entered===session.user.id)return;entered=session.user.id;S.user=session.user;
   setTimeout(()=>enter(session.user),0)});
 
@@ -297,8 +340,15 @@ async function enter(user){
   S.me=me;$("topbar").hidden=false;
   $("who").textContent="Logged in as "+(me?.display_name||user.email.split("@")[0]);
   if(!me||!me.active){status("");show("blockedCard");return}
+  if(me.must_change_password){status("");$("pwOpen").hidden=true;show("firstPwCard");$("fpNew").focus();return}
+  openBoard()}
+
+let boardOpened=false;
+async function openBoard(){
+  const me=S.me;$("pwOpen").hidden=false;
   $("tab-team").hidden=me.role!=="admin";
   show("main");
+  if(boardOpened)return;boardOpened=true;
   let start="tasks";try{start=localStorage.getItem("tab")||"tasks"}catch(e){}
   showTab(start);
   await Promise.all(["tasks","late","accounts","late_policy","audit_log","profiles","roles"].map(load));
@@ -452,9 +502,32 @@ function renderTeam(){if($("tab-team").hidden)return;
     <td class="c mono">${esc(p.username)}</td>
     <td class="c"><select class="cell" data-f="role" aria-label="Role" ${p.id===S.user?.id?"disabled":""}><option value="member" ${p.role==="member"?"selected":""}>Member</option><option value="admin" ${p.role==="admin"?"selected":""}>Admin</option></select></td>
     <td class="c"><input type="checkbox" data-f="active" aria-label="Can log in" ${p.active?"checked":""} ${p.id===S.user?.id?"disabled":""}></td>
-    <td><div class="actions"><button class="btn" data-psave="${p.id}">Save</button></div></td></tr>`).join("")
-    :`<tr><td colspan="5" class="empty">No team members yet.</td></tr>`}
-$("teamRows").addEventListener("click",async e=>{const id=e.target.dataset.psave;if(!id)return;
+    <td><div class="actions">${p.id===S.user?.id?"":`<button class="ghost" data-preset="${p.id}">Reset password</button>`}<button class="btn" data-psave="${p.id}">Save</button></div>
+      ${p.must_change_password?`<div class="sub" style="font-size:12px;text-align:right">Still on a temporary password</div>`:""}</td></tr>`).join("")
+    :`<tr><td colspan="5" class="empty">No team members yet. Add the first one above.</td></tr>`}
+$("memberForm").addEventListener("submit",async e=>{e.preventDefault();
+  const u=$("mUser").value.trim().toLowerCase(),n=$("mName").value.trim(),p=$("mPass").value;
+  if(p.length<8){status("Temporary passwords need at least 8 characters.");return}
+  const {error}=await sb.rpc("admin_create_member",{p_username:u,p_display_name:n,p_password:p});
+  if(error){status("Couldn't add the member: "+error.message);return}
+  status(`Added ${n||u}. They log in as "${u}" with the temporary password, then choose their own.`);
+  $("memberForm").reset()});
+$("teamRows").addEventListener("click",async e=>{
+  const rid=e.target.dataset.preset;
+  if(rid){const tr=e.target.closest("tr");
+    if(!tr.querySelector(".resetBox")){tr.querySelector(".actions").insertAdjacentHTML("afterbegin",
+      `<span class="resetBox row"><input class="cell" type="text" autocomplete="off" placeholder="New temporary password" aria-label="New temporary password" style="width:190px"><button class="btn" data-pset="${rid}">Set</button></span>`);
+      e.target.remove();tr.querySelector(".resetBox input").focus()}
+    return}
+  const sid=e.target.dataset.pset;
+  if(sid){const pw=e.target.previousElementSibling.value;
+    if(pw.length<8){status("Temporary passwords need at least 8 characters.");return}
+    e.target.disabled=true;
+    const {error}=await sb.rpc("admin_set_password",{p_user:sid,p_password:pw});
+    if(error){e.target.disabled=false;status("Couldn't reset the password: "+error.message);return}
+    status("Password reset. Give them the temporary password; they'll choose their own when they log in.");
+    await load("profiles");renderTeam();return}
+  const id=e.target.dataset.psave;if(!id)return;
   const tr=e.target.closest("tr"),f=n=>tr.querySelector(`[data-f="${n}"]`);
   const body={display_name:f("display_name").value.trim()||"Unnamed",role:f("role").value,active:f("active").checked};
   if(id===S.user?.id){delete body.role;delete body.active}
@@ -476,7 +549,7 @@ $("pwForm").addEventListener("submit",async e=>{e.preventDefault();$("pwErr").te
   const {error}=await sb.auth.updateUser({password:n1});
   $("pwBtn").disabled=false;
   if(error){$("pwErr").textContent="Couldn't change it: "+error.message;return}
-  await sb.rpc("log_session_event",{p_action:"Password changed"});
+  await sb.rpc("password_changed");
   closePw();status("Password changed.")});
 </script>
 </body>
