@@ -97,6 +97,8 @@ end $$;
 revoke all on function public.setup_needed(), public.bootstrap_admin(text),
   public.admin_create_member(text, text, text), public.admin_set_password(uuid, text),
   public.password_changed() from public;
+revoke execute on function public.admin_create_member(text, text, text), public.admin_set_password(uuid, text),
+  public.password_changed() from anon;
 grant execute on function public.setup_needed(), public.bootstrap_admin(text) to anon, authenticated;
 grant execute on function public.admin_create_member(text, text, text), public.admin_set_password(uuid, text),
   public.password_changed() to authenticated;

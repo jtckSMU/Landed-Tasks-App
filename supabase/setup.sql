@@ -1,7 +1,7 @@
 -- Team Roles Board: Supabase setup
 -- Run once in Supabase: SQL Editor -> New query -> paste this whole file -> Run.
--- Create the team's logins (Authentication -> Users -> Add user) BEFORE running it,
--- so everyone gets a profile. Anyone added later gets one automatically.
+-- Then run 002_accounts.sql. Logins are created from the board itself:
+-- first-time setup for jonathan, then Team -> Add member.
 
 create extension if not exists pgcrypto;
 
